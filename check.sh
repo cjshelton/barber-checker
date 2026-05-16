@@ -8,25 +8,31 @@ if [[ -z "${BRR_SECRET_KEY:-}" ]]; then
 fi
 
 get_stored_slot() {
-  curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-    "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/variables/EARLIEST_SLOT" \
-    | jq -r '.value // empty'
+  local response
+  response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+    "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/variables/EARLIEST_SLOT")
+  echo "get_stored_slot response: $response" >&2
+  echo "$response" | jq -r '.value // empty'
 }
 
 set_stored_slot() {
   local value="$1"
   local api="https://api.github.com/repos/$GITHUB_REPOSITORY/actions/variables/EARLIEST_SLOT"
+  local payload
+  payload=$(jq -n --arg v "$value" '{"name": "EARLIEST_SLOT", "value": $v}')
   local code
   code=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH \
     -H "Authorization: Bearer $GITHUB_TOKEN" \
     -H "Content-Type: application/json" \
-    "$api" -d "{\"name\":\"EARLIEST_SLOT\",\"value\":\"$value\"}")
+    "$api" -d "$payload")
+  echo "set_stored_slot PATCH response code: $code" >&2
   if [[ "$code" == "404" ]]; then
-    curl -s -X POST \
+    code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
       -H "Authorization: Bearer $GITHUB_TOKEN" \
       -H "Content-Type: application/json" \
       "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/variables" \
-      -d "{\"name\":\"EARLIEST_SLOT\",\"value\":\"$value\"}" > /dev/null
+      -d "$payload")
+    echo "set_stored_slot POST response code: $code" >&2
   fi
 }
 
