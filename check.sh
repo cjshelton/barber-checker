@@ -7,6 +7,29 @@ if [[ -z "${BRR_SECRET_KEY:-}" ]]; then
   exit 1
 fi
 
+get_stored_slot() {
+  curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+    "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/variables/EARLIEST_SLOT" \
+    | jq -r '.value // empty'
+}
+
+set_stored_slot() {
+  local value="$1"
+  local api="https://api.github.com/repos/$GITHUB_REPOSITORY/actions/variables/EARLIEST_SLOT"
+  local code
+  code=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH \
+    -H "Authorization: Bearer $GITHUB_TOKEN" \
+    -H "Content-Type: application/json" \
+    "$api" -d "{\"name\":\"EARLIEST_SLOT\",\"value\":\"$value\"}")
+  if [[ "$code" == "404" ]]; then
+    curl -s -X POST \
+      -H "Authorization: Bearer $GITHUB_TOKEN" \
+      -H "Content-Type: application/json" \
+      "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/variables" \
+      -d "{\"name\":\"EARLIEST_SLOT\",\"value\":\"$value\"}" > /dev/null
+  fi
+}
+
 send_brr_notification() {
   local title="$1"
   local message="$2"
@@ -57,33 +80,28 @@ total_slots=$(echo "$http_body" | jq '[.[] | length] | add // 0')
 
 if [[ "$total_slots" -eq 0 ]]; then
   echo "No availability found."
+  set_stored_slot "none"
   exit 0
 fi
 
 echo "Found $total_slots slot(s)!"
 
-# Format notification message
-notification_message=""
+# Find earliest slot
+earliest=$(echo "$http_body" | jq -r '[.[] | .[].time] | sort | .[0]')
+earliest_date=$(echo "$earliest" | cut -dT -f1)
+earliest_time=$(echo "$earliest" | grep -oE '[0-9]{2}:[0-9]{2}' | head -1)
+earliest_formatted=$(date -d "$earliest_date" '+%a %d %b' 2>/dev/null || date -j -f "%Y-%m-%d" "$earliest_date" '+%a %d %b' 2>/dev/null || echo "$earliest_date")
 
-while IFS= read -r date_key; do
-  # Format date nicely (e.g. "Tue 25 Feb")
-  formatted_date=$(date -d "$date_key" '+%a %d %b' 2>/dev/null || date -j -f "%Y-%m-%d" "$date_key" '+%a %d %b' 2>/dev/null || echo "$date_key")
+echo "  Earliest slot: $earliest_formatted at $earliest_time"
 
-  # Get times for this date
-  times=$(echo "$http_body" | jq -r --arg d "$date_key" '.[$d][] | .time' | while IFS= read -r t; do
-    # Extract HH:MM from ISO timestamp
-    echo "$t" | grep -oE '[0-9]{2}:[0-9]{2}' | head -1
-  done | paste -sd ', ' -)
+# Compare against stored earliest slot
+stored=$(get_stored_slot)
+set_stored_slot "$earliest"
 
-  if [[ -n "$times" ]]; then
-    notification_message+="$formatted_date: $times"$'\n'
-    echo "  $formatted_date: $times"
-  fi
-done < <(echo "$http_body" | jq -r 'keys[]')
-
-notification_message+="https://app.acuityscheduling.com/schedule.php?owner=62aceac4&appointmentType=8321518"
-
-# Send notification
-echo "Sending Brr notification..."
-send_brr_notification "Barber slot available!" "$notification_message"
-echo "Done."
+if [[ -z "$stored" || "$stored" == "none" || "$earliest" < "$stored" ]]; then
+  echo "Earlier slot found ($earliest vs stored: ${stored:-none}). Sending notification..."
+  send_brr_notification "✂️ $earliest_formatted at $earliest_time" "New earlier slot available — book now!"
+  echo "Done."
+else
+  echo "No earlier slot than $stored. Skipping notification."
+fi
