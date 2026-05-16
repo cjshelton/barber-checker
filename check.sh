@@ -2,33 +2,23 @@
 set -euo pipefail
 
 # Validate required env vars
-for var in RESEND_API_KEY EMAIL_TO EMAIL_FROM; do
-  if [[ -z "${!var:-}" ]]; then
-    echo "Error: $var is not set"
-    exit 1
-  fi
-done
+if [[ -z "${BRR_SECRET_KEY:-}" ]]; then
+  echo "Error: BRR_SECRET_KEY is not set"
+  exit 1
+fi
 
-send_email() {
-  local subject="$1"
-  local body="$2"
+send_brr_notification() {
+  local title="$1"
+  local message="$2"
 
   local payload
   payload=$(jq -n \
-    --arg to "$EMAIL_TO" \
-    --arg from "$EMAIL_FROM" \
-    --arg subject "$subject" \
-    --arg body "$body" \
-    '{
-      from: $from,
-      to: $to,
-      subject: $subject,
-      html: $body
-    }')
+    --arg title "$title" \
+    --arg message "$message" \
+    '{title: $title, message: $message}')
 
   curl -s --fail-with-body \
-    -X POST "https://api.resend.com/emails" \
-    -H "Authorization: Bearer $RESEND_API_KEY" \
+    -X POST "https://api.brrr.now/v1/$BRR_SECRET_KEY" \
     -H "Content-Type: application/json" \
     -d "$payload"
 }
@@ -42,7 +32,7 @@ echo "Checking availability from $today (7 days)..."
 # Fetch availability
 http_response=$(curl -s -w "\n%{http_code}" "$api_url") || {
   echo "Error: curl failed"
-  send_email "Barber Checker Error" "<p>curl request to Acuity API failed.</p>"
+  send_brr_notification "Barber Checker Error" "curl request to Acuity API failed."
   exit 1
 }
 
@@ -51,14 +41,14 @@ http_code=$(echo "$http_response" | tail -1)
 
 if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
   echo "Error: API returned HTTP $http_code"
-  send_email "Barber Checker Error" "<p>Acuity API returned HTTP $http_code.</p><pre>$http_body</pre>"
+  send_brr_notification "Barber Checker Error" "Acuity API returned HTTP $http_code."
   exit 1
 fi
 
 # Validate JSON
 if ! echo "$http_body" | jq empty 2>/dev/null; then
   echo "Error: response is not valid JSON"
-  send_email "Barber Checker Error" "<p>Acuity API returned invalid JSON.</p>"
+  send_brr_notification "Barber Checker Error" "Acuity API returned invalid JSON."
   exit 1
 fi
 
@@ -72,8 +62,8 @@ fi
 
 echo "Found $total_slots slot(s)!"
 
-# Format email body
-email_body="<h2>Barber availability found!</h2><ul>"
+# Format notification message
+notification_message=""
 
 while IFS= read -r date_key; do
   # Format date nicely (e.g. "Tue 25 Feb")
@@ -86,14 +76,14 @@ while IFS= read -r date_key; do
   done | paste -sd ', ' -)
 
   if [[ -n "$times" ]]; then
-    email_body+="<li><strong>$formatted_date</strong>: $times</li>"
+    notification_message+="$formatted_date: $times"$'\n'
     echo "  $formatted_date: $times"
   fi
 done < <(echo "$http_body" | jq -r 'keys[]')
 
-email_body+="</ul><p><a href=\"https://app.acuityscheduling.com/schedule.php?owner=62aceac4&appointmentType=8321518\">Book now</a></p>"
+notification_message+="https://app.acuityscheduling.com/schedule.php?owner=62aceac4&appointmentType=8321518"
 
 # Send notification
-echo "Sending email to $EMAIL_TO..."
-send_email "Barber slot available!" "$email_body"
+echo "Sending Brr notification..."
+send_brr_notification "Barber slot available!" "$notification_message"
 echo "Done."
