@@ -16,3 +16,4 @@ jobs:
         run: bash check.sh
         env:
           BRR_SECRET_KEY: ${{ secrets.BRR_SECRET_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
