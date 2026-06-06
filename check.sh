@@ -48,21 +48,41 @@ api_url="https://app.acuityscheduling.com/api/scheduling/v1/availability/times?o
 
 echo "Checking availability from $today (7 days)..."
 
-# Fetch availability
-http_response=$(curl -s -w "\n%{http_code}" "$api_url") || {
-  echo "Error: curl failed"
-  send_brr_notification "Barber Checker Error" "curl request to Acuity API failed."
-  exit 1
-}
+# Fetch availability — retry up to 3 times; 403 is treated as transient (no notification)
+MAX_ATTEMPTS=3
+http_body=""
+http_code=""
 
-http_body=$(echo "$http_response" | sed '$d')
-http_code=$(echo "$http_response" | tail -1)
+for attempt in $(seq 1 $MAX_ATTEMPTS); do
+  http_response=$(curl -s -w "\n%{http_code}" \
+    -H "User-Agent: Mozilla/5.0 (compatible; barber-checker/1.0)" \
+    "$api_url") || {
+    echo "Attempt $attempt: curl failed"
+    if [[ "$attempt" -lt "$MAX_ATTEMPTS" ]]; then sleep 10; continue; fi
+    send_brr_notification "Barber Checker Error" "curl request to Acuity API failed."
+    exit 1
+  }
 
-if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
-  echo "Error: API returned HTTP $http_code"
+  http_body=$(echo "$http_response" | sed '$d')
+  http_code=$(echo "$http_response" | tail -1)
+
+  if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
+    break
+  fi
+
+  echo "Attempt $attempt: API returned HTTP $http_code"
+  if [[ "$attempt" -lt "$MAX_ATTEMPTS" ]]; then sleep 10; continue; fi
+
+  # All attempts exhausted
+  if [[ "$http_code" -eq 403 ]]; then
+    # 403 is transient (IP rate limiting) — exit silently without notifying
+    echo "Received 403 after $MAX_ATTEMPTS attempts. Exiting silently."
+    exit 0
+  fi
+
   send_brr_notification "Barber Checker Error" "Acuity API returned HTTP $http_code."
   exit 1
-fi
+done
 
 # Validate JSON
 if ! echo "$http_body" | jq empty 2>/dev/null; then
