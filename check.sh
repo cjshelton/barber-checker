@@ -10,9 +10,10 @@ fi
 STATE_DIR="state"
 mkdir -p "$STATE_DIR"
 
-# Barber definitions — parallel arrays of name and calendarId
-BARBER_NAMES=("Charlie" "James")
-BARBER_CALENDAR_IDS=("2584005" "2583998")
+# Barber definitions — parallel arrays of name, calendarId, and appointmentTypeId
+BARBER_NAMES=("Charlie" "James" "Hali")
+BARBER_CALENDAR_IDS=("2584005" "2583998" "5678927")
+BARBER_APPOINTMENT_TYPE_IDS=("8321518" "8321518" "23895699")
 
 send_brr_notification() {
   local title="$1"
@@ -36,12 +37,13 @@ echo "Checking availability from $today (7 days)..."
 for i in "${!BARBER_NAMES[@]}"; do
   name="${BARBER_NAMES[$i]}"
   calendar_id="${BARBER_CALENDAR_IDS[$i]}"
+  appointment_type_id="${BARBER_APPOINTMENT_TYPE_IDS[$i]}"
   state_file="${STATE_DIR}/earliest_slot_${name,,}.txt"
 
   echo ""
   echo "--- Checking $name (calendarId: $calendar_id) ---"
 
-  api_url="https://app.acuityscheduling.com/api/scheduling/v1/availability/times?owner=62aceac4&appointmentTypeId=8321518&calendarId=${calendar_id}&startDate=${today}&maxDays=7&timezone=Europe/London"
+  api_url="https://app.acuityscheduling.com/api/scheduling/v1/availability/times?owner=62aceac4&appointmentTypeId=${appointment_type_id}&calendarId=${calendar_id}&startDate=${today}&maxDays=7&timezone=Europe/London"
 
   MAX_ATTEMPTS=3
   http_body=""
