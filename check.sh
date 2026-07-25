@@ -17,7 +17,7 @@ BARBER_APPOINTMENT_TYPE_IDS=("8321518" "8321518" "23895699")
 
 # Specific date we always watch for cancellations, regardless of the earliest
 # slot found in the rolling 7-day window. Set to empty to disable.
-TARGET_DATE="2026-08-10"
+TARGET_DATE="2026-08-08"
 
 send_brr_notification() {
   local title="$1"
