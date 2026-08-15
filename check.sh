@@ -15,10 +15,6 @@ BARBER_NAMES=("Charlie" "James" "Hali")
 BARBER_CALENDAR_IDS=("2584005" "2583998" "5678927")
 BARBER_APPOINTMENT_TYPE_IDS=("8321518" "8321518" "23895699")
 
-# Specific date we always watch for cancellations, regardless of the earliest
-# slot found in the rolling 7-day window. Set to empty to disable.
-TARGET_DATE="2026-08-08"
-
 send_brr_notification() {
   local title="$1"
   local message="$2"
@@ -124,44 +120,6 @@ for i in "${!BARBER_NAMES[@]}"; do
     echo "Done."
   else
     echo "No earlier slot for $name than $stored. Skipping notification."
-  fi
-
-  # --- Cancellation watch for a specific target date ---
-  # The rolling window above only reports the *earliest* slot, so a cancellation
-  # on a later target date (e.g. after an existing earlier slot) is never seen.
-  # Fetch that single date separately and notify on any newly-available slot.
-  if [[ -z "$TARGET_DATE" ]]; then continue; fi
-
-  echo ""
-  echo "--- Checking $name for cancellations on $TARGET_DATE ---"
-
-  target_url="https://app.acuityscheduling.com/api/scheduling/v1/availability/times?owner=62aceac4&appointmentTypeId=${appointment_type_id}&calendarId=${calendar_id}&startDate=${TARGET_DATE}&maxDays=1&timezone=Europe/London"
-
-  if ! fetch_availability "$target_url" "$name ($TARGET_DATE)"; then continue; fi
-
-  target_state_file="${STATE_DIR}/target_slots_${name,,}.txt"
-  current_times=$(echo "$FETCH_BODY" | jq -r '[.[] | .[].time] | .[]' 2>/dev/null \
-    | grep -oE '[0-9]{2}:[0-9]{2}' | sort -u || true)
-  stored_times=$(cat "$target_state_file" 2>/dev/null || true)
-
-  # Slots available now that weren't available on the previous run (cancellations).
-  new_times=$(comm -23 <(printf '%s\n' "$current_times") <(printf '%s\n' "$stored_times") || true)
-
-  printf '%s\n' "$current_times" > "$target_state_file"
-
-  if [[ -n "${current_times//[[:space:]]/}" ]]; then
-    echo "  Slots on $TARGET_DATE: $(printf '%s' "$current_times" | paste -sd, -)"
-  else
-    echo "  No slots on $TARGET_DATE."
-  fi
-
-  if [[ -n "${new_times//[[:space:]]/}" ]]; then
-    times_list=$(printf '%s' "$new_times" | paste -sd, -)
-    target_formatted=$(date -d "$TARGET_DATE" '+%a %d %b' 2>/dev/null || date -j -f "%Y-%m-%d" "$TARGET_DATE" '+%a %d %b' 2>/dev/null || echo "$TARGET_DATE")
-    echo "New slot(s) on $TARGET_DATE for $name: $times_list. Sending notification..."
-    send_brr_notification "✂️ $name: cancellation on $target_formatted!" "New slot(s) at $times_list — book now!"
-  else
-    echo "No new slots on $TARGET_DATE for $name. Skipping notification."
   fi
 done
 
