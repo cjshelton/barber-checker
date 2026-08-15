@@ -5,13 +5,23 @@ on:
     - cron: '*/30 * * * *'
   workflow_dispatch:
 
+# Serialise runs so two of them can never race to push state. Cancelling is
+# wrong here: a cancelled run may already have notified but not yet committed.
+concurrency:
+  group: barber-availability-state
+  cancel-in-progress: false
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v6.0.3
+        with:
+          # Full history so the rebase fallback in push_state works.
+          fetch-depth: 0
       - name: Check availability
         run: bash check.sh
         env:
